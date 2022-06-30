@@ -1,0 +1,155 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-05-22'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(SHAPforxgboost)
+library(lubridate)
+library(zoo)
+library(dplyr)
+library(base)
+library(forecast)
+library(caret)
+library(xgboost)
+library(base)
+library(ggplot2)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+covid_data <- read.csv("data/owid-covid-data.csv",
+                       stringsAsFactors = FALSE,
+                       check.names =  FALSE)
+
+policy_data <- read.csv("data/OxCGRT_latest.csv",
+                       stringsAsFactors = FALSE,
+                       check.names =  FALSE)
+
+covid_data$date <- as.Date(covid_data$date)
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+policy_data$Date <- as.Date(as.character(policy_data$Date),"%Y%m%d")
+np <- policy_data[policy_data$Jurisdiction != "STATE_TOTAL",]
+data <- covid_data %>% select(date,location,new_cases,reproduction_rate) %>% filter(location=="Australia") %>% select(-location)
+pdata <- np %>% select(Date,CountryName,`C1_School closing`,`C6_Stay at home requirements`,`C7_Restrictions on internal movement`,`C2_Workplace closing`,`H6_Facial Coverings`,`H3_Contact tracing`) %>% filter(CountryName=="Australia") %>% select(-CountryName)
+
+
+ndata <- na.omit(data)
+npdata <- na.omit(pdata)
+dat = left_join(npdata, ndata , by = c("Date" = "date"))
+dat <- na.omit(dat)
+
+
+```
+```{r}
+# full <- dat %>%
+#     dplyr::mutate(., 
+#                   months = lubridate::month(Date),
+#                   years = lubridate::year(Date))
+```
+
+```{r}
+train <- dat[dat$Date < "2022-01-26",]
+test <- dat[-(1:nrow(train)),]
+
+```
+
+```{r}
+train_Dmatrix <- train %>% select(`C1_School closing`,`C6_Stay at home requirements`,`C7_Restrictions on internal movement`,`C2_Workplace closing`,`H6_Facial Coverings`,`H3_Contact tracing`,new_cases) %>% 
+                 as.matrix() 
+                
+pred_Dmatrix <- test %>% select(`C1_School closing`,`C6_Stay at home requirements`,`C7_Restrictions on internal movement`,`C2_Workplace closing`,`H6_Facial Coverings`,`H3_Contact tracing`,new_cases) %>% 
+                as.matrix() 
+targets <- train$reproduction_rate
+```
+
+
+```{r}
+xgb_trcontrol <- trainControl(
+  method = "cv", 
+  number = 10,
+  allowParallel = TRUE, 
+  verboseIter = FALSE, 
+  returnData = FALSE
+)
+#Building parameters set
+xgb_grid <- base::expand.grid(
+  list(
+    nrounds = seq(100,200),
+    max_depth = c(6,15,20), 
+    colsample_bytree = 1, 
+    eta = 0.5,
+    gamma = 0,
+    min_child_weight = 1,  
+    subsample = 1)
+)
+```
+
+```{r,warning=FALSE}
+#parameter tuning 
+model_xgb <- caret::train(
+  train_Dmatrix, targets,
+  trControl = xgb_trcontrol,
+  tuneGrid = xgb_grid,
+  method = "xgbTree",
+  verbosity = 0,
+  nthread = 10
+)
+```
+
+```{r}
+model_xgb$bestTune
+```
+```{r}
+
+fitted <- model_xgb %>% predict(train) %>% ts(start = c(2020,3),frequency = 365)
+
+```
+
+```{r}
+# prediction on a train set
+fitted <- model_xgb %>% predict(test)
+
+
+```
+```{r}
+# xgb_imp <- xgb.importance(
+#   feature_names = colnames(train_Dmatrix),
+#   model = model_xgb$finalModel)
+# xgb.ggplot.importance(xgb_imp,n_clusters = c(2))+ 
+#   ggtitle("") +
+#   theme_bw()+
+#   theme(legend.position="none")
+# xgb_imp$Importance
+model <-
+  xgboost(
+    data = train_Dmatrix,
+    label = targets,
+    nrounds = 100,
+    objective = "reg:squarederror",
+    early_stopping_rounds = 3,
+    max_depth = 6,
+    eta = .5,
+    verbose = 0
+)
+
+shap_long <- shap.prep(xgb_model=model, X_train = train_Dmatrix)
+shap.plot.summary(shap_long)
+
+
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

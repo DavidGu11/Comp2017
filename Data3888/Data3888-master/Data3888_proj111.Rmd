@@ -1,0 +1,843 @@
+---
+title: "[Data3888 COVID P9](https://github.sydney.edu.au/zigu7311/Data3888)"
+author: "Jesica Han, Jingxuan Wang, Haoran Guan, Yuxuan Wang, Ziwen Gu"
+date: "`r format(Sys.time(), '%Y')`"
+
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    thumbnails: true
+    toc_depth: 3
+    lightbox: true
+    gallery: false
+    highlight: tango
+    code_folding: hide
+---
+
+
+```{r warning = F,message = F}
+suppressPackageStartupMessages( #loading packages
+{library(ggplot2)
+library(dplyr)
+library(janitor)
+library(tidyverse)
+library(lubridate)
+library(tibble)
+library(ggthemes)
+library(plotly)
+library(randomcoloR)}
+)
+covid_data <- read.csv("owid-covid-data.csv") #read in csv file
+data1<-read.csv(file='owid-covid-data.csv')
+covid_full = read.csv("owid-covid-data.csv")
+dataa <- read.csv("owid-covid-data.csv")
+covid_data <- read.csv("owid-covid-data.csv",
+                       stringsAsFactors = FALSE,
+                       check.names =  FALSE)
+policy_data <- read.csv("OxCGRT_latest.csv",
+                       stringsAsFactors = FALSE,
+                       check.names =  FALSE)
+covid_data$date <- as.Date(covid_data$date)
+```
+
+### Executive summary 
+The work presented in this report constitutes a contribution to modelling and estimating the impact of policies by using the time series approach. Our work demonstrates how the COVID-19 data could be utilised to analyse the effect of government responses. Stringency index as one of our principal variables was used to develop auto integrated moving average model(ARIMA) and ETS(error, trend, seasonal) model for forecasting the correlation between new_cases_smoothed and new_vaccinations_smoothed. Meanwhile, RDD(Regression discontinuity design) and XGBoost are also used as tools for analyzing the impact of government response in controlling the spread of COVID-19, namely, the reproduction rate. The selected models, in particular, the ARIMA and ETS, were evaluated by comparing their performance on the time series data of different countries. The overall result achieved by modelling will be used to deploy an interactive web application that contains the information to enlighten prospective students about the influence of public policies.
+
+### Background and motivation 
+In March 2020, the World Health Organization (WHO) declared COVID-19 a pandemic, caused by the novel SARS-CoV-2 virus, since then, the study of its impact in every aspect of the world has always been one of the foremost scientifically and technologically difficult issues around the world. Our study concentrates on discovering how different levels of government responses have contributed to affecting the spread of COVID-19. The process of the analysis will be done using innovative approaches to add insight into the experimental study of the global pandemic. 
+
+#### Dataset description & Origin
+The owid-covid-data dataset is a collection of the COVID-19 data maintained by Our World in Data. Meanwhile, the Oxford Covid-19 Government Response Tracker(OxCGRT) collects systematic information on policy measures that have been utilised by governments to address the challenge of Covid-19. The dataset is collected by the Blavatnik School of Government.
+
+The confirmed cases and deaths are collected from the COVID-19 Data Repository by the Center for Systems Science and Engineering (CSSE) at Johns Hopkins University (JHU) by the date of the report. Meanwhile, the data in relation to testing for COIVD19 and vaccination against COVID-19 are both collected by the Our World in Data from official reports.
+
+#### Project Overview
+The project endeavours to discover the impact of government responses to the outcome of virus control, which in this study it will be explored based on reproduction rate as a performance measurement using RDD and XGBoost. Afterwards, the similarities between each of the countries will be explored using hierarchical clustering. In the later step, the correlation between new_vaccination_smoothed and new_cases_smoothed and the correlation between new_vaccination_smoothed and new_deaths_smoothed will be compared in the countries we have conditionally sampled. The ultimate step will be to do a forecast for the future correlation using the ARIMA model and ETS model and draw a conclusion from the findings.
+
+![flowchart(Click to zoom in)](covid_shiny/www/workflow.PNG)
+
+#### Key findings
+1. The measures taken by the governments in 10 countries that have been chosen have a strong focus on reducing the spread of the virus instead of controlling deaths.
+
+2. New_cases dominates any of the 6 policies we have chosen in terms of influencing the reproduction rate
+
+3. Facial covering policy is the most effective policy in controlling the reproduction rate of the 6 policies. 
+
+### Method
+
+#### XGBoost
+
+```{r,message = F,warning=F}
+library(xgboost)
+library(SHAPforxgboost)
+library(caret)
+```
+
+```{r,message = F,warning = F}
+policy_data$Date <- as.Date(as.character(policy_data$Date),"%Y%m%d")
+np <- policy_data[policy_data$Jurisdiction != "STATE_TOTAL",]
+data <- covid_data %>% select(date,location,new_cases,reproduction_rate) %>% filter(location=="Australia") %>% select(-location)
+pdata <- np %>% select(Date,CountryName,`C1_School closing`,`C6_Stay at home requirements`,`C7_Restrictions on internal movement`,`C2_Workplace closing`,`H6_Facial Coverings`,`H3_Contact tracing`) %>% filter(CountryName=="Australia") %>% select(-CountryName)
+ndata <- na.omit(data)
+npdata <- na.omit(pdata)
+dat = left_join(npdata, ndata , by = c("Date" = "date"))
+dat <- na.omit(dat)
+```
+We apply XGBoost model to predict the reproduction rate with 6 policies and new_cases at the day as our input.
+
+We use train_control() function from caret package to conducted hyperparameter optimisation for XGBoost and its out-of-sample performance using 10-fold cross-validation. 
+
+The following SHAP Plot provides a list of our input and their importance in influencing reproduction rate is ranked in descending order. If we are to use US as a example, we see that new_case dominates other policies and stands our as the most important predictor. 
+
+New_case and Every policy we have selected has one dot on each row while the x position depicts the impact of the input on XGBoost's prediction for reproduction rate and the color of the dot represents the value of the input. A positive SHAP value indicates that the variable increases the magnitude of the prediction of reproduction rate and therefore we should predominately see purple dost on a policy that effectively controls the spread of COVID-19, which in our case, is face covering. (Click to zoom in the plot)
+
+```{r,message = F,warning = F}
+train <- dat[dat$Date < "2022-01-26",]
+test <- dat[-(1:nrow(train)),]
+
+train_Dmatrix <- train %>% select(`C1_School closing`,`C6_Stay at home requirements`,`C7_Restrictions on internal movement`,`C2_Workplace closing`,`H6_Facial Coverings`,`H3_Contact tracing`,new_cases) %>% 
+                 as.matrix() 
+                
+pred_Dmatrix <- test %>% select(`C1_School closing`,`C6_Stay at home requirements`,`C7_Restrictions on internal movement`,`C2_Workplace closing`,`H6_Facial Coverings`,`H3_Contact tracing`,new_cases) %>% 
+                as.matrix() 
+targets <- train$reproduction_rate
+```
+
+```{r,message = F,warning = F}
+model <-
+  xgboost(
+    data = train_Dmatrix,
+    label = targets,
+    nrounds = 126,
+    objective = "reg:squarederror",
+    early_stopping_rounds = 3,
+    max_depth = 8
+    ,
+    eta = .5,
+    verbose = 0
+)
+shap_long <- shap.prep(xgb_model=model, X_train = train_Dmatrix)
+shap.plot.summary(shap_long)
+```
+
+#### RDD 
+Regression discontinuity design is applied to evaluate the casual effect of government involvement (represented by the stringency index) which applying a treatment assignment mechanism based on a continuous eligibility index to measure the casual effects of an intervention.
+```{r, warning=F,message = F}
+data <- read.csv("owid-covid-data.csv") 
+data <- rbind(data[data$location == 'United States',
+                   c("date", "location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'Australia',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'Germany',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'United Kingdom',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'Algeria',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'India',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'Argentina',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'Norway',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'Japan',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")],
+              data[data$location == 'New Zealand',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed","population", "stringency_index","new_vaccinations_smoothed")])
+data$date <- as.Date(data$date)
+data$stringency_index <- ifelse(is.na(data$stringency_index ), NA,data$stringency_index)
+data$reproduction_rate <- ifelse(is.na(data$reproduction_rate ), NA,data$reproduction_rate)
+
+data_United_States = data[data$location == 'United States',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_Australia = data[data$location == 'Australia',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_Germany = data[data$location == 'Germany',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_United_Kingdom = data[data$location == 'United Kingdom',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_Algeria = data[data$location == 'Algeria',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_India = data[data$location == 'India',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_Argentina = data[data$location == 'Argentina',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_Norway = data[data$location == 'Norway',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_Japan = data[data$location == 'Japan',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+
+data_New_Zealand = data[data$location == 'New Zealand',
+                   c("date","location", "reproduction_rate",
+                     "new_cases_smoothed","new_deaths_smoothed", "stringency_index","new_vaccinations_smoothed")]
+```
+As mentioned by Thoemmes[1] "The Analysis of the Regression-Discontinuity Design in R" and J.Mummolo, our design should be described as fuzzy as it does not perfectly determine the treatment exposure but does create a discontinuity in the probability of treatment exposure.
+
+##### Assumptions and Conditions
+
+Our regression discontinuity design has satisfied the following conditions to become an appropriate model for measuring the effect of the stringency index:
+
+1. A continuous eligibility index, which, in our case is the stringency index.
+
+2. A clearly defined cutoff point, which, in our case is 50 where the level of government involvement is deemed as somewhat moderate.
+
+Our regression discontinuity design is developed based on the following assumptions:
+
+1. The stringency index should be continuous around the cutoff point. The stringency index is not being intentionally manipulated by governments to create a pretended effort in controlling the spread of COVID-19. 
+
+2. Countries close to the cutoff point should be somewhat similar.
+
+The cutoff point at 50 divides the level of government involvement in controlling COVID-19 into mild and strict. 
+
+We firstly compute a dummy variable as a threshold to the stringency index, allowing us to specify a linear model to regress reproduction rates on the threshold dummy and the stringency index centring around 50. We see that, on average, the reproduction rate for countries with a stringency index of 50 is 0.199 points lower.
+
+Reproduction_rate= $\beta_0 + \beta_1T+ \beta_2(\ stringency\_index-50) + \beta_3( \ stringency\_index-50)T + \varepsilon$ where $T$ = 1 if stringency_index >= 50 ,$T$ = 0 if stringency_index < 50. 
+
+```{r,fig.width = 15,fig.height = 3,message = F,warning = F,eval = F}
+library(gridExtra)
+P1<-data %>% 
+  select(stringency_index,reproduction_rate) %>%
+  mutate(D = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate)) + 
+  geom_vline(xintercept = 50, color = "black", size = 1, linetype = "dashed") +
+  geom_point(aes(color = D)) +
+  geom_smooth(method = "lm")+
+  labs(y = "reproduction rate",
+       x = "Stingency index",
+       title = " Overall stringency VS reproduction rate")
+
+P2<-data %>% 
+  select(stringency_index,reproduction_rate) %>%
+  mutate(D = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate,color = D)) + 
+  geom_vline(xintercept = 50, color = "black", size = 1, linetype = "dashed") +
+  geom_point() +
+  geom_smooth(method = "lm")+
+  labs(y = "reproduction rate",
+       x = "Stingency index",
+       title = " Overall stringency VS reproduction rate")
+
+grid.arrange(P1,P2,ncol = 2)
+```
+
+##### Countries
+Here we have plotted stringency index vs reproduction rate for 10 countries we have choosen. 
+```{r,warning=FALSE}
+plot_us <- data_United_States %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " US")
+
+plot_aus <- data_Australia %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " Australia")
+
+plot_ger<-data_Germany %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " Germany")
+
+plot_uk<-data_United_Kingdom %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " United Kingdom")
+
+plot_alge<-data_Algeria %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " Algeria")
+
+plot_india<-data_India %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " India")
+
+plot_Argen<-data_Argentina %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " Argentina")
+
+
+plot_Nor<-data_Norway %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " Norway")
+
+plot_Ja<-data_Japan %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " Japan")
+
+plot_nz<-data_New_Zealand %>%
+  select(stringency_index, reproduction_rate) %>%
+  mutate(threshold = as.factor(ifelse(stringency_index >= 50, 1, 0))) %>%
+  ggplot(aes(x = stringency_index, y = reproduction_rate, color = threshold)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  guides(color = FALSE) +
+  geom_vline(xintercept = 50, color = "red",
+    size = 1, linetype = "dashed") +
+  labs(y = "reproduction_rate",
+       x = "stringency_index",
+       title = " New Zealand")
+```
+
+ 
+```{r,fig.width=15,fig.height=5,warning=FALSE,message=FALSE}
+library(gridExtra)
+grid.arrange(plot_us,plot_aus,plot_ger,plot_uk,plot_alge,plot_india,plot_Argen,plot_Nor,plot_Ja, plot_nz,ncol = 5,nrow = 2)
+```
+
+We see the majority of countries have their reproduction rate decreasing as the stringency index has reached 50 while it is also notable that the reproduction rate becomes even higher after the cutoff point in countries such as Algeria and India. While the exception does not make sense if we only consider the response of the government, it can be explained by external factors related to the seriousness of COVID-19(e.g. when new daily cases soar, the growth of reproduction rate could outweigh any effort to control the spread).
+
+#### ARIMA model and ETS model 
+
+```{r, message = F, warning = F}
+library(forecast)
+library(fUnitRoots)
+```
+
+```{r, message = F, warning = F}
+corlist1<-corlist2<-corlist3<-corlist4<-corlist5<-corlist6<-corlist7<-corlist8<-corlist9<-corlist10<-c()
+for (i in c(0:185)) {
+  corvalue<-cor(data1[data1$location=='Algeria',]$new_vaccinations_smoothed[(370+i):(550+i)],data1[data1$location=='Algeria',]$new_cases_smoothed[(370+i):(550+i)])
+  corlist1<-c(corlist1,corvalue)
+  corvalue<-cor(data1[data1$location=='Argentina',]$new_vaccinations_smoothed[(400+i):(580+i)],data1[data1$location=='Argentina',]$new_cases_smoothed[(400+i):(580+i)])
+  corlist2<-c(corlist2,corvalue)
+  corvalue<-cor(data1[data1$location=='Australia',]$new_vaccinations_smoothed[(400+i):(580+i)],data1[data1$location=='Australia',]$new_cases_smoothed[(400+i):(580+i)])
+  corlist3<-c(corlist3,corvalue)
+  corvalue<-cor(data1[data1$location=='Germany',]$new_vaccinations_smoothed[(399+i):(579+i)],data1[data1$location=='Germany',]$new_cases_smoothed[(399+i):(579+i)])
+  corlist4<-c(corlist4,corvalue)
+  corvalue<-cor(data1[data1$location=='India',]$new_vaccinations_smoothed[(396+i):(576+i)],data1[data1$location=='India',]$new_cases_smoothed[(396+i):(576+i)])
+  corlist5<-c(corlist5,corvalue)
+  corvalue<-cor(data1[data1$location=='Japan',]$new_vaccinations_smoothed[(404+i):(584+i)],data1[data1$location=='Japan',]$new_cases_smoothed[(404+i):(584+i)])
+  corlist6<-c(corlist6,corvalue)
+  corvalue<-cor(data1[data1$location=='New Zealand',]$new_vaccinations_smoothed[(367+i):(547+i)],data1[data1$location=='New Zealand',]$new_cases_smoothed[(367+i):(547+i)])
+  corlist7<-c(corlist7,corvalue)
+  corvalue<-cor(data1[data1$location=='Norway',]$new_vaccinations_smoothed[(370+i):(550+i)],data1[data1$location=='Norway',]$new_cases_smoothed[(370+i):(550+i)])
+  corlist8<-c(corlist8,corvalue)
+  corvalue<-cor(data1[data1$location=='United Kingdom',]$new_vaccinations_smoothed[(403+i):(583+i)],data1[data1$location=='United Kingdom',]$new_cases_smoothed[(403+i):(583+i)])
+  corlist9<-c(corlist9,corvalue)
+  corvalue<-cor(data1[data1$location=='United States',]$new_vaccinations_smoothed[(404+i):(584+i)],data1[data1$location=='United States',]$new_cases_smoothed[(404+i):(584+i)])
+  corlist10<-c(corlist10,corvalue)
+}
+
+corlist1[is.na(corlist1)]<-0
+corlist2[is.na(corlist2)]<-0
+corlist3[is.na(corlist3)]<-0
+corlist4[is.na(corlist4)]<-0
+corlist5[is.na(corlist5)]<-0
+corlist6[is.na(corlist6)]<-0
+corlist7[is.na(corlist7)]<-0
+corlist8[is.na(corlist8)]<-0
+corlist9[is.na(corlist9)]<-0
+corlist10[is.na(corlist10)]<-0
+```
+
+
+##### Comparing the correlation between new_vaccination_smoothed with the correlation between new_vaccination_smoothed and new_deaths_smoothed
+```{r, message = F, warning = F}
+#Algeria
+corli1<-corli2<-corli3<-corli4<-corli5<-corli6<-corli7<-corli8<-corli9<-corli10<-c()
+for (i in c(0:185)) {
+  
+  corvalue<-cor(data1[data1$location=='Algeria',]$new_vaccinations_smoothed[(370+i):(550+i)],data1[data1$location=='Algeria',]$new_deaths_smoothed[(370+i):(550+i)])
+  corli1<-c(corli1,corvalue)
+  corvalue<-cor(data1[data1$location=='Argentina',]$new_vaccinations_smoothed[(400+i):(580+i)],data1[data1$location=='Argentina',]$new_deaths_smoothed[(400+i):(580+i)])
+  corli2<-c(corli2,corvalue)
+  corvalue<-cor(data1[data1$location=='Australia',]$new_vaccinations_smoothed[(400+i):(580+i)],data1[data1$location=='Australia',]$new_deaths_smoothed[(400+i):(580+i)])
+  corli3<-c(corli3,corvalue)
+  corvalue<-cor(data1[data1$location=='Germany',]$new_vaccinations_smoothed[(399+i):(579+i)],data1[data1$location=='Germany',]$new_deaths_smoothed[(399+i):(579+i)])
+  corli4<-c(corli4,corvalue)
+  corvalue<-cor(data1[data1$location=='India',]$new_vaccinations_smoothed[(396+i):(576+i)],data1[data1$location=='India',]$new_deaths_smoothed[(396+i):(576+i)])
+  
+  corli5<-c(corli5,corvalue)
+  corvalue<-cor(data1[data1$location=='Japan',]$new_vaccinations_smoothed[(404+i):(584+i)],data1[data1$location=='Japan',]$new_deaths_smoothed[(404+i):(584+i)])
+  corli6<-c(corli6,corvalue)
+  corvalue<-cor(data1[data1$location=='Norway',]$new_vaccinations_smoothed[(370+i):(550+i)],data1[data1$location=='Norway',]$new_cases[(370+i):(550+i)])
+  
+  corli8<-c(corlist8,corvalue)
+  corvalue<-cor(data1[data1$location=='United Kingdom',]$new_vaccinations_smoothed[(403+i):(583+i)],data1[data1$location=='United Kingdom',]$new_deaths_smoothed[(403+i):(583+i)])
+  
+  corli9<-c(corli9,corvalue)
+  corvalue<-cor(data1[data1$location=='United States',]$new_vaccinations_smoothed[(404+i):(584+i)],data1[data1$location=='United States',]$new_deaths_smoothed[(404+i):(584+i)])
+  
+  corli10<-c(corli10,corvalue)
+}
+
+corli1[is.na(corli1)]<-0
+corli2[is.na(corli2)]<-0
+corli3[is.na(corli3)]<-0
+corli4[is.na(corli4)]<-0
+corli5[is.na(corli5)]<-0
+corli6[is.na(corli6)]<-0
+corli8[is.na(corli8)]<-0
+corli9[is.na(corli9)]<-0
+corli10[is.na(corli10)]<-0
+
+countries <- c("Algeria","Argentina","Australia","Germany","India","Japan","Norway","UK","US")
+vaccination_2_death <- c(mean(corli1[corli1!=0]),mean(corli2[corli2!=0]),mean(corli3[corli3!=0]),mean(corli4[corli4!=0]),mean(corli5[corli5!=0]),mean(corli6[corli6!=0]),mean(corli8[corli8!=0]),mean(corli9[corli9!=0]),mean(corli10[corli10!=0]))
+vaccination_2_cases <- c(mean(corlist1[corlist1!=0]),mean(corlist2[corlist2!=0]),mean(corlist3[corlist3!=0]),mean(corlist4[corlist4!=0]),mean(corlist5[corlist5!=0]),mean(corlist6[corlist6!=0]),mean(corlist8[corlist8!=0]),mean(corlist9[corlist9!=0]),mean(corlist10[corlist10!=0]))
+
+df<- data.frame(countries,vaccination_2_death,vaccination_2_cases)
+```
+
+Observing the result we have obtained by comparing two kinds of correlations. It can be argued that vaccinations serve a greater amount of purpose in controlling cases instead of deaths within the 9 countries we have selected to compare. We see that new_vaccination_smoothed is negatively correlated with new_cases in 5 countries but negatively correlated with deaths in 2 countries. 
+
+```{r}
+df
+```
+#### ARIMA
+ARIMA(Autoregressive integrated moving average) was developed due to the unique nature of temporal correlation and skewness exhibited in individual time series of temperature and precipitation variables [3]. 
+
+To develop an ARIMA model to forecast the correlation between new_cases and new_vaccinations_smoothed, we take the following assumptions:
+
+1. The covid-19 data which we take as the time series parameter should be stationary such that the properties of the time series do not depend on the time frame. 
+
+2. The covid-19 data should be univariate.
+
+In our exploratory studies, we have found out our time series to be non-stationary and ARIMA in this case may not work well. 
+
+#### ETS
+To choose an alternative model to make a prediction on the correlation between new_cases and new_vaccinations_smoothed we can apply exponential smoothing state space model that was developed based on the classification methods studied by Hyndman[2]. The model can be automatically estimated with $ets()$ function which estimates the model parameters and returns information about the fitted model. 
+
+For instance, for each country we will be using 'ZZZ' method which ensures all components are selected using the information citeration. Specifically, the model selected is $ETS(A,A_d,N)$ for every country which uses a damped trend method with additive errors as $A_d$ indicates a trend component of additive damped and a seasonal component of None. 
+
+$ETS(A,A_d,N)$ is the model underlying Damped trend method which was studied by Roberts[4], which in detail can be calculated as follows:
+
+$y_t = l_{t-1} + \phi b_{t-1} + \varepsilon_t$
+
+$l_t = l_{t-1} + \phi b_{t-1} + \alpha\varepsilon_t$
+
+$b_t = \phi b_{t-1} + \beta\varepsilon_t$
+
+where $o$ refers to the dampening parameters which slows down the trend and it becomes non-linear.
+
+If we use the United States as a example, we see that the parameters estimates are 
+$\alpha = 0.9999,\beta  = 0.3832,\phi   = 0.9287$ and the initial states values are also given which we have $l = 0, b = -0.0059$
+
+As we have estimated our model, we can achieve point forecasting by iterating equations for $t = T +1,...,T+h$ and setting $\varepsilon_t = 0$ for $t>H$. As our models are with only additive components, the forecast distributions are normal with the medians and means being equal. 
+
+The prediction interval of our Our ETS model can be written as follows:
+
+$\sigma_{h}^2 = \sigma^2[1+\alpha^2(h-1) + \frac{\beta\phi h}{(1-\phi)^2}\{2a(1-\phi) + \beta\phi\}-\frac{\beta\phi(1-\phi^h)}{(1-\phi)^2(1-\phi^2)}\{2a(1-\phi^2) + \beta\phi(1+2\phi-\phi^h)\}]$
+
+Where c depends on the coverage probability and $\sigma_{h}^2$ is the forecast variance, the detailed formula for the forecast has been studied by Hyndman et al in Chapter 6. 
+
+### Model Evaluation 
+
+#### XGBoost
+We use perform grid search as one of the hyperparameter tunning method for our XGBoost model using 10 cross-validation. We define a list of values to try for both max_depth and nrounds and a grid search would build a model for each possible combinations. In our final XGBoost we use nrounds = 126 and max_depth = 8 as it leads to the best performance of XGBoost where RMSE = 0.2214353, $R^2$ = 0.7130622 , $MAE$ = 0.1387576
+
+#### Clustering
+```{r warning=F,message=F}
+# List of countries to study
+countries = c("United States", "India", "Australia", "Germany","Argentina","Japan","New Zealand","Norway","Algeria","United Kingdom")
+countries <- sort(countries)
+covid_full$date <- as.Date(covid_full$date)
+
+## selecting the 10 countries and required time period. 
+covid <- covid_full[covid_full$location %in% countries, ]
+covid <- covid[ (covid$date >= "2020-03-01" & covid$date <= "2022-03-01") , ]
+
+covid_countries <- covid_full[covid_full$location %in% c("United States", "India", "Australia", "Germany","Argentina","Japan","New Zealand","Norway","Algeria","United Kingdom"),]
+covid_countries$date <- as.Date(covid_countries$date)
+
+```
+
+To further look into the similarities between every pair of countries in terms of stringency index to evaluate our regression discontinuity design, we have employed hierarchical agglomerative clustering to partition the 10 countries we have selected based on their similarities and to visualise them in a form of LSTM network.
+
+The dissimilarity matrix clearly defines the similarities in a pair of countries. In our circumstance, we have implemented Eucildean distances to compute distance measures. 
+
+$d_{euc}(country1,country2) =\sqrt{\sum_{i=1}^n(country1-country2)^2}$ 
+
+where country1 and country2 form a pair of countries to compare. In R it is easy to illustrate the degree of similarities using $hclust$ on the distance matrix we have computed.
+```{r,message = F,warning=F}
+library(pheatmap)
+
+time_index <- seq(as.Date("2020-03-01"), as.Date('2021-12-30'),'days')
+
+covid_alternative <- NULL # create a new data frame to store result 
+
+for ( i in countries){
+  thiscountry <- covid[ covid$location == i , ] 
+  thiscountry <- thiscountry[ match(time_index, thiscountry$date) , ] # ensure the time index is in order of the time index, by matching the two vectors 
+  covid_alternative <- rbind(covid_alternative,thiscountry) 
+}
+
+l_p_distance <- function(x, y, p){
+    distance = sum((x - y)^p, na.rm = TRUE)^(1/p)
+    return(distance)
+}
+
+p = 100
+covid_list = split.data.frame(covid[,c("date","stringency_index")], covid$location)
+n = length(countries)
+distance_matrix <- matrix(0, n, n)
+dateindex = covid_list[[1]]$date
+for (i in 1:n ){
+    for (j in 1:n){
+          index_i = match(covid_list[[i]]$date, dateindex)
+          index_j = match(covid_list[[j]]$date, dateindex) 
+          ts_i <- covid_list[[i]][index_i,"stringency_index"]
+          ts_j <- covid_list[[j]][index_j,"stringency_index"]
+          distance_matrix[i,j] <-  l_p_distance(ts_i, ts_j, p)
+    }
+}
+rownames(distance_matrix) <- colnames(distance_matrix) <- countries
+distance_matrix[!is.finite(distance_matrix)] <- 0
+
+matrix_dist <- as.dist(distance_matrix)
+hclust_res <- hclust( matrix_dist, method = "ward.D")  
+
+clustering <- pheatmap(distance_matrix, 
+                 cluster_cols = T,
+                 cluster_rows = T,
+                 main = "L^2 distance", 
+                 clustering_method = "ward.D")
+clustering
+```
+
+
+#### Performance Evalutation of ARIMA and ETS with data split 
+For error measurement of the ETS and ARIMA model, one of the many techniques that can be utilized is the measurement of AIC and RMSE 
+
+In the measurement of AIC, we see that all of the predictive models are generated by auto.Arima(), which is a function in R that uses a variation of the Hyndman-Khandakar algorithm[5] leading to a smaller AIC than ETS, a possible speculation is that the time series plots for all of the countries we have chosen do not appear to involve trends or seasonality. Meanwhile, autocorrelation in the time series data(i.e. past correlation explains present correlation) can also lead to a favourable outcome for the ARIMA model over the ETS model in our case. 
+```{r}
+corlist1[is.na(corlist1)]<-corlist2[is.na(corlist2)]<-corlist3[is.na(corlist3)]<-corlist4[is.na(corlist4)]<-corlist5[is.na(corlist5)]<-corlist6[is.na(corlist6)]<-corlist7[is.na(corlist7)]<-corlist8[is.na(corlist8)]<-corlist9[is.na(corlist9)]<-corlist10[is.na(corlist10)]<-0
+
+#ETS
+fit1<-ets(corlist1,model='ZZZ')
+fit2<-ets(corlist2,model='ZZZ')
+fit3<-ets(corlist3,model='ZZZ')
+fit4<-ets(corlist4,model='ZZZ')
+fit5<-ets(corlist5,model='ZZZ')
+fit6<-ets(corlist6,model='ZZZ')
+fit7<-ets(corlist7,model='ZZZ')
+fit8<-ets(corlist8,model='ZZZ')
+fit9<-ets(corlist9,model='ZZZ')
+fit10<-ets(corlist10,model='ZZZ')
+
+```
+
+```{r}
+ar1 <- summary(auto.arima(corlist1))
+ar2 <- summary(auto.arima(corlist2))
+ar3 <- summary(auto.arima(corlist3))
+ar4 <- summary(auto.arima(corlist4))
+ar5 <- summary(auto.arima(corlist5))
+ar6 <- summary(auto.arima(corlist6))
+ar7 <- summary(auto.arima(corlist7))
+ar8 <- summary(auto.arima(corlist8))
+ar9 <- summary(auto.arima(corlist9))
+ar10 <- summary(auto.arima(corlist10))
+
+ets1 <- summary(fit1)
+ets2 <- summary(fit2)
+ets3 <- summary(fit3)
+ets4 <- summary(fit4)
+ets5 <- summary(fit5)
+ets6 <- summary(fit6)
+ets7 <- summary(fit7)
+ets8 <- summary(fit8)
+ets9 <- summary(fit9)
+ets10 <- summary(fit10)
+
+countries <- c("Algeria","Argentina","Australia","Germany","India","Japan","New Zealand","Norway","UK","US")
+AIC_arima<- c(ar1$aic,ar2$aic,ar3$aic,ar4$aic,ar5$aic,ar6$aic,ar7$aic,ar8$aic,ar9$aic,ar10$aic)
+AIC_ets<- c(ets1$aic,ets2$aic,ets3$aic,ets4$aic,ets5$aic,ets6$aic,ets7$aic,ets8$aic,ets9$aic,ets10$aic)
+
+dff<- data.frame(countries,AIC_arima,AIC_ets)
+dff
+```
+Also, we have split 60% of the data into our training set and the rest is the test set. The result shows that the ARIMA model fits the training data and testing data somewhat better than the ETS model on US time series data. However, if we do the same for Japan, this time result gives a different result where the ARIMA model fits the training data better but ETS fits the testing data more accurately. The selection of the best predictive model strongly depends on the time series data that we are using it.
+
+### Shiny App
+
+The [shiny app](https://estelleouo.shinyapps.io/covid_shiny/) is provided for the international students who are interested in their target countries’ epidemic situation. Different countries have different policies to control the spread of Covid-19. International students are affected by these policies. In order to ensure their own health and reduce the risk of being infected, they pay great attention to the policy strength of the target country and the national vaccination situation. Therefore, our dashboard shows what they valued in non-professional figures to help them consider what will happen in future outbreaks.
+
+In the dashboard, the introduction part can give a brief summary of the project. Then, four question panels are shown. The first panel shows the policy overview, which includes the policy response that can be divided into different types. At the same panel, The world overview shows the world trends and users can select the date they want to check. The location overview shows the specific type policy of a location and it can be changed over time. The second panel displays the covid overview. The panel gives the basic situation information about the Covid-19, also can focus on a specific country. Latest details of selected countries such as population also be contained. In the third panel, RDD analysis is going to show the impact of policy implied, which compares the stringency index and reproduction rate. The world overview shows the word trends and location overview shows the result of specific locations. Finally, the vaccination page illustrates the rolling correlation over 30 days compares to their static correlation, which is the red line.
+
+
+### Limitation discussions and possible refinement 
+
+#### Limitation: 
+1. As the confirmed cases and deaths are collected by date of the report instead of the date of test/death. The reported number does not necessarily represent the actual number due to the existence of the long reporting chain, which may distort our analysis of time series as overestimating/underestimating can take place. 
+
+2. Total_cases contains 3264 rows of missing value while total_deaths contains 21280 rows of missing value. The incomplete data can reduce the statistical power of the study and lead to possible bias toward our analysis.
+
+3. Different countries tend to publish their testing data according to different definitions as mentioned in Our checklist for COVID-19 testing data, which may cause misunderstanding. 
+
+4. The effects of policies do not come into play and produce effects immediately, but take a period to develop, which means the timing of when policies will begin to function is uncertain.
+
+5. 10 countries that have been used for this experimental study have been conditionally chosen, which means that we have set the condition to select at least 1 country per continent while we want to find the country that is representative of the continent. This certainly leads to severe bias as the outcome of the selection is crowd sampled as we orally asked people around us to sample countries. The overall conclusion that has been reached from this study can be exclusive to the countries that have been decided by oral survey and group decision and hence should not be regarded as a solution or insight to the worldwide problem of pandemic.
+
+### Future development
+Our development of the models and approach definitely suffer from time constraints due to inadequate communication plans and time management. If we are given a longer period to complete the project, the logistics of our project could have been refined. 
+
+Meanwhile, the sample selection process also lacks depth as we developed an interest in the countries we have chosen through word of mouth and team discussion. A better sampling method can be made such that we can set a standard to measure the representativeness of a country to the continent where it is located. We can then rank the country in descending order to pick the 2 most representative countries on each continent as the focus of our project. This way, our project has a strong focus on solving the global issue of pandemics.
+
+### Conclusion
+This paper addressed the effectiveness of policies in controlling the reproduction rate by developing a regression discontinuity design and XGBoost. We conclude that new_cases have a higher influence over the 6 policies we have chosen to impact the reproduction rate. Meanwhile, government strategy has a higher concentration on reducing the spread of COVID rather than reducing the number of deaths as we see a significant decrease in the reproduction rate as government stringency_index increases and fewer daily new cases as a number of new vaccinations increases. 
+
+### Student Contribution
+Haoran Guan designed modelling method such as RDD and DID and implemented ETS model to be used in the evaluation step. Ziwen Gu completed ARIMA modelling and evaluation of ETS and ARIAM model and the entire report except shiny app and report styling. Jessica Han completed the shiny app of the report and helped with report styling. She also collaborated with Haoran Guan to complete ETS modelling. Jingxuan Wang completed XGBoost model and evaluation. She also design and implemented the entire shiny app and helped answering presentation Q&A section. Yuxuan Wang completed RDD implementation and data visualisation based on the model and clustering evaluation. 
+
+
+### References 
+[1] Thoemmes, Felix; Liao, Wang; Jin, Ze. The Analysis of the Regression-Discontinuity Design in R. Journal of Educational and Behavioral Statistics, v42 n3 p341-360 Jun 2017
+
+[2] Hyndman, R.J., Akram, Md., and Archibald, B. (2008) "The admissible parameter space for exponential smoothing models". Annals of Statistical Mathematics, 60(2), 407--426.
+
+[3] Hyndman, R.J., Koehler, A.B., Ord, J.K., and Snyder, R.D. (2008) Forecasting with exponential smoothing: the state space approach, Springer-Verlag. http://www.exponentialsmoothing.net.
+
+[4] Roberts, S.A., 1982. A General Class of Holt-Winters Type Forecasting Models. Management Science. 28, 808–820. https://doi.org/10.1287/mnsc.28.7.808
+
+[5] Hyndman, R. J., & Khandakar, Y. (2008). Automatic time series forecasting: The forecast package for R. Journal of Statistical Software, 27(1), 1–22. [DOI]
+
+
+### Appendix
+
+
+
+#### ARIMA box test for US
+In our exploratory analysis, we check for stationarity and use a time series plot for the US as an example to examine. As we observe the time series plot, we do not find seasonality rules out series as it does not contain a repeating pattern within the time frame. Trends do not appear as we do not notice a clear increasing or decreasing pattern in the set time frame. However, we do find independence assumption being violated. 
+
+```{r warning = F, message = F}
+Box.test(diff(corlist10),lag=1, type="Ljung-Box")
+```
+We then conduct compute the Ljung--Box test statistic to examine the null hypothesis of independence in the given US time series. the Ljung-Box $Q^∗$
+
+statistic has a p-value less than 0.05 (for h=1 ) we hence reject our null hypothesis and conclude that our values are showing dependence on each other. Specifically, the daily change in the correlation between new_vaccination_smoothed and new_cases is not a random amount and exhibits serial correlation.
+
+When we look at the autocorrelation and partial autocorrelation plot, we see that the ACF of US time series data decreases slowly, suggesting our assumption of stationarity has been violated, in which case, choosing the ARIMA model for predicting the correlation between new_cases and new_vaccinations_smoothed might be inappropriate. Hence we will consider another approach.  
+
+```{r}
+urkpssTest(corlist5, type = c("tau"), lags = c("short"),use.lag = NULL, doplot = TRUE)
+```
+
+#### ETS
+model summery for US time series
+```{r,eval = F}
+summary(fit10)
+```
+
+```{r,eval = F}
+#see fit plot
+par(mfrow=c(2,5))
+plot(corlist1,ylab='Algeria',type='l')
+lines(fit1$fitted,col='red')
+plot(corlist2,ylab='Argentina',type='l')
+lines(fit2$fitted,col='red')
+plot(corlist3,ylab='Australia',type='l')
+lines(fit3$fitted,col='red')
+plot(corlist4,ylab='Germany',type='l')
+lines(fit4$fitted,col='red')
+plot(corlist5,ylab='India',type='l')
+lines(fit5$fitted,col='red')
+plot(corlist6,ylab='Japan',type='l')
+lines(fit6$fitted,col='red')
+plot(corlist7,ylab='New Zealand',type='l')
+lines(fit7$fitted,col='red')
+plot(corlist8,ylab='Norway',type='l')
+lines(fit8$fitted,col='red')
+plot(corlist9,ylab='United Kingdom',type='l')
+lines(fit9$fitted,col='red')
+plot(corlist10,ylab='United States',type='l')
+lines(fit10$fitted,col='red')
+```
+
+
+#### XGBOOST hyperparameter tuning
+```{r}
+xgb_trcontrol <- trainControl(
+  method = "cv", 
+  number = 10,
+  allowParallel = TRUE, 
+  verboseIter = FALSE, 
+  returnData = FALSE
+)
+#Building parameters set
+xgb_grid <- base::expand.grid(
+  list(
+    nrounds = seq(100,200),
+    max_depth = c(6,8,15,16,32), 
+    colsample_bytree = 1, 
+    eta = 0.5,
+    gamma = 0,
+    min_child_weight = 1,  
+    subsample = 1)
+)
+
+model_xgb <- caret::train(
+  train_Dmatrix, targets,
+  trControl = xgb_trcontrol,
+  tuneGrid = xgb_grid,
+  method = "xgbTree",
+  verbosity = 0,
+  nthread = 10
+)
+model_xgb$bestTune
+```
+
+#### Data paritioning for ETS and ARIMA evaluation
+
+```{r}
+train <- head(corlist10,round(length(corlist10) * 0.6))
+h <- length(corlist10) - length(train)
+test <- tail(corlist10, h)
+fit.arima <- auto.arima(train)
+fit.ets <- ets(train)
+a1 <- fit.arima %>% forecast(h = h) %>%
+  accuracy(test)
+print("ARIMA")
+a1[,c("RMSE","MAE","MAPE","MASE")]
+print("ETS")
+a2 <- fit.ets %>% forecast(h =h) %>%
+  accuracy(test)
+
+##                     RMSE          MAE       MAPE       MASE
+## Training set 0.001248393 0.0008054172   1.116599  0.1135887
+## Test set     0.461917432 0.3929026944 556.220332 55.4114027
+```
+```{r}
+a2[,c("RMSE","MAE","MAPE","MASE")]
+```
+
+```{r}
+train <- head(corlist6,round(length(corlist6) * 0.6))
+h <- length(corlist6) - length(train)
+test <- tail(corlist6, h)
+fit.arima <- auto.arima(train)
+fit.ets <- ets(train)
+a1 <- fit.arima %>% forecast(h = h) %>%
+  accuracy(test)
+print("ARIMA")
+a1[,c("RMSE","MAE","MAPE","MASE")]
+print("ETS")
+a2 <- fit.ets %>% forecast(h =h) %>%
+  accuracy(test)
+
+
+##                     RMSE          MAE       MAPE       MASE
+## Training set 0.001248393 0.0008054172   1.116599  0.1135887
+## Test set     0.461917432 0.3929026944 556.220332 55.4114027
+```
+
+
+```{r}
+a2[,c("RMSE","MAE","MAPE","MASE")]
+
+```
+
+
