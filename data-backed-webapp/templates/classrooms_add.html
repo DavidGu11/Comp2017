@@ -1,0 +1,22 @@
+{% include 'class_top.html' %}
+<div class="content">
+    <div class="container details">
+
+        <h2 class="title"> classroom Add </h2>
+
+        <form class="Add" method="POST" action="{{url_for('classrooms_add')}}">
+
+            classroomid: <input type="text" name="classroomid" value="Empty ud" placeholder="classroomid">
+            Seats: <input type="text" name="seats" value="0" placeholder="seats">
+            Type: <input type="text" name="type" value="no typ" placeholder="type">
+            <br/>
+            <button class="flat" type="submit">Add</button>
+
+            
+
+        </form>
+        <br/>
+        <div>
+
+    </div>
+</div>

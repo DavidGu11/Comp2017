@@ -1,0 +1,25 @@
+{% include 'assessment_top.html' %}
+<div id="content">
+    <div id="container">
+        <h1 class="page-title">List of assessments</h1>
+        <table class="pure-table">
+            <thead>
+                <tr><th>ASS_ID</th><th>uoSCode</th><th>Semester</th>><th>Year</th>><th>WEIGHTING</th></tr>
+            </thead>
+            <tbody>
+               
+                {% for ass in assessments %}
+                    <tr>
+						<td> {{ass[0]}}</td>
+                        <td> {{ass[1]}} </td>
+                        <td> {{ass[2]}} </td>
+                        <td> {{ass[3]}} </td>
+                        <td> {{ass[4]}} </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

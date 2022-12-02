@@ -1,0 +1,26 @@
+{% include 'assessment_top.html' %}
+<div id="content">
+    <div id="container">
+        <h1 class="page-title">Enter UosCode to find matching assessment</h1>
+        <form method="get" action="/search_assessments">
+            <input type="text" name="search_assessments">
+            <button>submit</button>
+        </form>
+        <table class="pure-table">
+            <thead>
+                <tr><th>UosCode</th><th>Ass_ID</th><th>Weighting</th></tr>
+            </thead>
+            <tbody>
+                {% for ass in assessments %}
+                    <tr>
+						<td> {{ass[0]}}</td>
+                        <td> {{ass[1]}} </td>
+                        <td> {{ass[2]}} </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

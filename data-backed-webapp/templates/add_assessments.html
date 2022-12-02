@@ -1,0 +1,24 @@
+{% include 'assessment_top.html' %}
+<div class="content">
+    <div class="container details">
+
+        <h2 class="title"> Add new assessments </h2>
+
+        <form class="Add" method="POST" action="{{url_for('add_assessments')}}">
+
+            Ass_ID: <input type="text" name="Ass_ID" value="" placeholder="assessment id">
+            uoSCode: <input type="text" name="uoSCode" value="" placeholder="uosCode">
+            Semester: <input type="text" name="Semester" value="" placeholder="Semester">
+            year: <input type="text" name="year" value="" placeholder="year">
+            weighting: <input type="text" name="weighting" value="" placeholder="weighting">
+            <br/>
+            <button class="flat" type="submit">Add</button>
+
+            
+
+        </form>
+        <br/>
+        <div>
+
+    </div>
+</div>

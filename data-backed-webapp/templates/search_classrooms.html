@@ -1,0 +1,26 @@
+{% include 'class_top.html' %}
+<div id="content">
+    <div id="container">
+        <h1 class="page-title">Enter seats to find available classrooms</h1>
+        <form method="get" action="/search_classrooms">
+            <input type="text" name="search_classrooms">
+            <button>submit</button>
+        </form>
+        <table class="pure-table">
+            <thead>
+                <tr><th>Classroomid</th><th>Seats</th><th>Type</th></tr>
+            </thead>
+            <tbody>
+                {% for classroom in classrooms %}
+                    <tr>
+						<td> {{classroom[0]}}</td>
+                        <td> {{classroom[1]}} </td>
+                        <td> {{classroom[2]}} </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

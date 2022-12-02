@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!-- this goes to the 'static' folder and grabs our CSS -->
+        <!-- [Brief Intro:] CSS is how we make the websites look nicer -->
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='css/pure.css') }}">
+        <link rel=stylesheet type=text/css href="{{ url_for('static', filename='css/main.css') }}">
+        <title>{{ page.title }}</title>
+    </head>
+    
+<style>
+    .dropbtn {
+      background-color:#446CB3;
+      color: white;
+      padding: 13px;
+      font-size: 16px;
+      border: none;
+    }
+
+    .dropdown {
+      position: relative;
+      display: inline-block;
+    }
+
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      background-color: #446CB3;
+      min-width: 160px;
+      box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+      z-index: 1;
+    }
+
+    .dropdown-content a {
+      color: black;
+      padding: 12px 16px;
+      text-decoration: none;
+      display: block;
+    }
+
+    .dropdown-content a:hover {background-color: #ddd;}
+
+    .dropdown:hover .dropdown-content {display: block;}
+
+    .dropdown:hover .dropbtn {background-color: #3e8e41;}
+</style>
+    <body>
+        <!-- Generating the menu and what happens when the user is logged in VS logged out -->
+        <div id="header" class="pure-menu pure-menu-horizontal">
+            <a href="/" class="pure-menu-heading pure-menu-link">UniDB</a>
+            {% if session.logged_in %}
+            <ul class="pure-menu-list">
+                <li class="pure-menu-item"><a href="{{ url_for('classrooms') }}" class="pure-menu-link">classrooms</a></li>
+                <li class="pure-menu-item"><a href="{{ url_for('classrooms_add')}}" class="pure-menu-link">Add classroom</a></li>
+                <li class="pure-menu-item"><a href="{{ url_for('classrooms_type')}}" class="pure-menu-link">Classroom type</a></li>
+                <li class="pure-menu-item"><a href="{{ url_for('search_classroom')}}" class="pure-menu-link">Find seats</a></li>
+                <li class="pure-menu-item"><a href="{{ url_for('logout')}}" class="pure-menu-link">Logout</a></li>
+            </ul>
+            <div id="top-unikey">
+                <div class="dropdown">
+                  <button class="dropbtn">{{ session.name }}</button>
+                  <div class="dropdown-content">
+                    <a href="{{ url_for('update_address') }}">Update Address</a>
+                    <a href="{{ url_for('update_password') }}">Update Password</a>
+
+                  </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <ul class=flashes>
+            {% for message in messages %}
+              <li>{{ message }}</li>
+            {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
